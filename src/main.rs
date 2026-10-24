@@ -34,6 +34,37 @@ impl Lbp {
         let rom_len = rom.len().min(self.mem.len());
         self.mem[0..rom_len].copy_from_slice(&rom[0..rom_len]);
     }
+
+    pub fn poll_keys(&mut self) {
+        let keys = [
+            macroquad::input::KeyCode::X,
+            macroquad::input::KeyCode::Key1,
+            macroquad::input::KeyCode::Key2,
+            macroquad::input::KeyCode::Key3,
+            macroquad::input::KeyCode::Q,
+            macroquad::input::KeyCode::W,
+            macroquad::input::KeyCode::E,
+            macroquad::input::KeyCode::A,
+            macroquad::input::KeyCode::S,
+            macroquad::input::KeyCode::D,
+            macroquad::input::KeyCode::Z,
+            macroquad::input::KeyCode::C,
+            macroquad::input::KeyCode::Key4,
+            macroquad::input::KeyCode::R,
+            macroquad::input::KeyCode::F,
+            macroquad::input::KeyCode::V,
+        ];
+
+        let mut key_value: u16 = 0;
+        for (key_id, key_code) in keys.iter().enumerate() {
+            if macroquad::input::is_key_down(*key_code) {
+                key_value |= 1 << key_id;
+            }
+        }
+
+        self.mem[0] = key_value.to_be_bytes()[0];
+        self.mem[1] = key_value.to_be_bytes()[1];
+    }
 }
 
 fn window_config() -> macroquad::window::Conf {
@@ -66,6 +97,10 @@ async fn main() {
     texture.set_filter(macroquad::texture::FilterMode::Nearest);
     loop {
         lbp.cycle();
+        lbp.poll_keys();
+        if macroquad::input::is_key_down(macroquad::input::KeyCode::Escape) {
+            break;
+        }
 
         let bank = lbp.mem[5] as usize;
         for y in 0..SCREEN_HEIGHT {
