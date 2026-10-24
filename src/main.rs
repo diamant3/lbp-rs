@@ -1,3 +1,9 @@
+use macroquad::prelude::*;
+
+const SCREEN_WIDTH: usize = 256;
+const SCREEN_HEIGHT: usize = 256;
+const MEMORY_SIZE: usize = 16 * 1024 * 1024 + 8;
+
 struct Lbp {
     mem: Vec<u8>,
     pc: usize,
@@ -6,118 +12,97 @@ struct Lbp {
 impl Lbp {
     pub fn new() -> Self {
         Self {
-            mem: vec![0; 0x1000000],
+            mem: vec![0u8; MEMORY_SIZE],
             pc: 0,
         }
     }
 
     pub fn cycle(&mut self) {
-        self.pc = (self.mem[2].wrapping_shl(16)) as usize
-            | (self.mem[3].wrapping_shl(8)) as usize
-            | self.mem[4] as usize;
+        self.pc = read_24bit(&self.mem, 2);
 
-        for _ in 0..0xffff {
-            let a = (self.mem[self.pc].wrapping_shl(16)) as usize
-                | (self.mem[self.pc + 1].wrapping_shl(8)) as usize
-                | self.mem[self.pc + 2] as usize;
-            let b = (self.mem[self.pc + 3].wrapping_shl(16)) as usize
-                | (self.mem[self.pc + 4].wrapping_shl(8)) as usize
-                | self.mem[self.pc + 5] as usize;
-            let c = (self.mem[self.pc + 6].wrapping_shl(16)) as usize
-                | (self.mem[self.pc + 7].wrapping_shl(8)) as usize
-                | self.mem[self.pc + 8] as usize;
+        for _ in 0..0x10000 {
+            let a = read_24bit(&self.mem, self.pc);
+            let b = read_24bit(&self.mem, self.pc + 3);
 
             self.mem[b] = self.mem[a];
-            self.pc = c;
+
+            self.pc = read_24bit(&self.mem, self.pc + 6);
         }
     }
 
     pub fn load(&mut self, rom: Vec<u8>) {
-        self.mem[0..rom.len()].copy_from_slice(&rom);
+        let rom_len = rom.len().min(self.mem.len());
+        self.mem[0..rom_len].copy_from_slice(&rom[0..rom_len]);
     }
 }
 
-impl ggez::event::EventHandler for Lbp {
-    fn update(&mut self, _ctx: &mut ggez::Context) -> ggez::GameResult {
-        self.cycle();
-
-        Ok(())
-    }
-
-    fn draw(&mut self, ctx: &mut ggez::Context) -> ggez::GameResult {
-        let mut canvas = ggez::graphics::Canvas::from_frame(ctx, ggez::graphics::Color::BLACK);
-
-        let zz = self.mem[5].wrapping_shl(16);
-        let mut colors = [0; 255];
-
-        let mut rect = ggez::graphics::Rect::new(0.0, 0.0, 1.0, 1.0);
-        let mut mb = ggez::graphics::MeshBuilder::new();
-        for yy in 0..u8::MAX {
-            let yy = yy.wrapping_shl(8);
-
-            for xx in 0..u8::MAX {
-                let color = self.mem[(zz | yy | xx) as usize];
-                colors[xx as usize] = color;
-            }
-
-            for (xx, &(mut color)) in colors.iter().enumerate() {
-                if color <= 216 {
-                    let mut b = color % 6 * 51;
-                    color /= 6;
-
-                    let mut g = color % 6 * 51;
-                    color /= 6;
-
-                    let mut r = color % 6 * 51;
-
-                    r /= 255;
-                    g /= 255;
-                    b /= 255;
-
-                    let _ = mb.rectangle(
-                        ggez::graphics::DrawMode::fill(),
-                        rect,
-                        ggez::graphics::Color::from_rgb(r, g, b),
-                    );
-                } else if (217..255).contains(&color) {
-                    let _ = mb.rectangle(
-                        ggez::graphics::DrawMode::fill(),
-                        rect,
-                        ggez::graphics::Color::BLACK,
-                    );
-                } else {
-                    let _ = mb.rectangle(
-                        ggez::graphics::DrawMode::fill(),
-                        rect,
-                        ggez::graphics::Color::WHITE,
-                    );
-                }
-
-                rect = ggez::graphics::Rect::new(xx as f32, yy as f32, 1.0, 1.0);
-
-                let mesh = ggez::graphics::Mesh::from_data(ctx, mb.build());
-                canvas.draw(&mesh, ggez::graphics::DrawParam::default());
-            }
-        }
-        canvas.finish(ctx)
-    }
-}
-
-fn main() {
-    let (ctx, el) = ggez::ContextBuilder::new("lbp-rs", "Diamond Rivero")
-        .window_setup(ggez::conf::WindowSetup::default().title("lbp-rs"))
-        .window_mode(
-            ggez::conf::WindowMode::default()
-                .dimensions(256.0, 256.0)
-                .resizable(false),
-        )
-        .build()
-        .unwrap();
-
+#[macroquad::main("lbp-rs")]
+async fn main() {
     let mut lbp = Lbp::new();
 
-    let rom_path: Vec<String> = std::env::args().collect::<Vec<String>>();
-    lbp.load(rom_path[1].as_bytes().to_vec());
+    let args: Vec<String> = std::env::args().collect::<Vec<String>>();
+    if let Some(rom_path) = args.get(1) {
+        let rom = macroquad::file::load_file(rom_path).await.unwrap();
+        lbp.load(rom);
+    }
 
-    let _ = ggez::event::run(ctx, el, lbp);
+    macroquad::window::request_new_screen_size(SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32);
+    let mut image = macroquad::texture::Image::gen_image_color(
+        SCREEN_WIDTH as u16,
+        SCREEN_HEIGHT as u16,
+        macroquad::color::WHITE,
+    );
+    let texture = macroquad::texture::Texture2D::from_image(&image);
+
+    loop {
+        lbp.cycle();
+
+        let bank = lbp.mem[5] as usize;
+        for y in 0..SCREEN_HEIGHT {
+            for x in 0..SCREEN_WIDTH {
+                let offset = (bank << 16) | (y << 8) | x;
+                let color_index = lbp.mem[offset];
+                println!("color index: {}", color_index);
+                let color_value = get_palette(color_index);
+
+                image.set_pixel(x as u32, y as u32, color_value);
+            }
+        }
+
+        texture.update(&image);
+        macroquad::texture::draw_texture_ex(
+            &texture,
+            0.0,
+            0.0,
+            macroquad::color::WHITE,
+            macroquad::texture::DrawTextureParams {
+                dest_size: Some(macroquad::math::vec2(
+                    macroquad::window::screen_width(),
+                    macroquad::window::screen_height(),
+                )),
+                ..Default::default()
+            },
+        );
+        macroquad::window::next_frame().await
+    }
+}
+
+fn read_24bit(mem: &[u8], offset: usize) -> usize {
+    let first_byte = mem[offset] as usize;
+    let second_byte = mem[offset + 1] as usize;
+    let third_byte = mem[offset + 2] as usize;
+
+    (first_byte << 16) | (second_byte << 8) | third_byte
+}
+
+fn get_palette(color_index: u8) -> macroquad::color::Color {
+    if color_index > 216 {
+        return macroquad::color::WHITE;
+    }
+
+    let r = color_index / 36;
+    let g = color_index / 6 % 6;
+    let b = color_index % 6;
+
+    macroquad::color_u8!(r, g, b, 255)
 }
