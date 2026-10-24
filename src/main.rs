@@ -36,7 +36,17 @@ impl Lbp {
     }
 }
 
-#[macroquad::main("lbp-rs")]
+fn window_config() -> macroquad::window::Conf {
+    macroquad::window::Conf {
+        window_title: "lbp-rs".to_owned(),
+        window_width: SCREEN_WIDTH as i32,
+        window_height: SCREEN_HEIGHT as i32,
+        icon: None,
+        ..Default::default()
+    }
+}
+
+#[macroquad::main(window_config)]
 async fn main() {
     let mut lbp = Lbp::new();
 
@@ -46,11 +56,10 @@ async fn main() {
         lbp.load(rom);
     }
 
-    macroquad::window::request_new_screen_size(SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32);
     let mut image = macroquad::texture::Image::gen_image_color(
         SCREEN_WIDTH as u16,
         SCREEN_HEIGHT as u16,
-        macroquad::color::WHITE,
+        macroquad::color::BLACK,
     );
     let texture = macroquad::texture::Texture2D::from_image(&image);
 
@@ -62,7 +71,6 @@ async fn main() {
             for x in 0..SCREEN_WIDTH {
                 let offset = (bank << 16) | (y << 8) | x;
                 let color_index = lbp.mem[offset];
-                println!("color index: {}", color_index);
                 let color_value = get_palette(color_index);
 
                 image.set_pixel(x as u32, y as u32, color_value);
@@ -96,13 +104,17 @@ fn read_24bit(mem: &[u8], offset: usize) -> usize {
 }
 
 fn get_palette(color_index: u8) -> macroquad::color::Color {
-    if color_index > 216 {
-        return macroquad::color::WHITE;
+    if (216..255).contains(&color_index) {
+        return macroquad::color::BLACK;
     }
 
-    let r = (color_index / 36) * 0x33;
-    let g = (color_index / 6 % 6) * 0x33;
-    let b = (color_index % 6) * 0x33;
+    let r = color_index.saturating_div(36);
+    let g = color_index.saturating_div(6).rem_euclid(6);
+    let b = color_index.rem_euclid(6);
+
+    let r = r.wrapping_mul(0x33);
+    let b = b.wrapping_mul(0x33);
+    let g = g.wrapping_mul(0x33);
 
     macroquad::color_u8!(r, g, b, 255)
 }
