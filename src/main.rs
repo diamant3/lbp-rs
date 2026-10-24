@@ -63,6 +63,7 @@ async fn main() {
     );
     let texture = macroquad::texture::Texture2D::from_image(&image);
 
+    texture.set_filter(macroquad::texture::FilterMode::Nearest);
     loop {
         lbp.cycle();
 
