@@ -100,9 +100,9 @@ fn get_palette(color_index: u8) -> macroquad::color::Color {
         return macroquad::color::WHITE;
     }
 
-    let r = color_index / 36;
-    let g = color_index / 6 % 6;
-    let b = color_index % 6;
+    let r = (color_index / 36) * 0x33;
+    let g = (color_index / 6 % 6) * 0x33;
+    let b = (color_index % 6) * 0x33;
 
     macroquad::color_u8!(r, g, b, 255)
 }
