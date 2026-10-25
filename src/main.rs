@@ -7,6 +7,7 @@ const MEMORY_SIZE: usize = 16 * 1024 * 1024 + 8;
 struct Lbp {
     mem: Vec<u8>,
     pc: usize,
+    audiobuffer: Vec<u8>,
 }
 
 impl Lbp {
@@ -14,6 +15,7 @@ impl Lbp {
         Self {
             mem: vec![0u8; MEMORY_SIZE],
             pc: 0,
+            audiobuffer: vec![0; 256],
         }
     }
 
@@ -65,6 +67,43 @@ impl Lbp {
         self.mem[0] = key_value.to_be_bytes()[0];
         self.mem[1] = key_value.to_be_bytes()[1];
     }
+
+    // thanks to Google AI mode :)
+    pub fn process_audio(&mut self) -> Vec<u8> {
+        let audio_address = (self.mem[6] as usize) << 8 | self.mem[7] as usize;
+
+        for byte in 0..256 {
+            let sample_byte = self.mem[audio_address + byte];
+            self.audiobuffer.push(sample_byte);
+        }
+
+        let audio_data_len = self.audiobuffer.len() as u32;
+        let file_size = 36 + audio_data_len;
+        let byte_rate = 15360u32;
+        let block_alignment = 1u16;
+        let bits_per_sample = 8u16;
+
+        let mut wav: Vec<u8> = std::vec::Vec::with_capacity(44 + self.audiobuffer.len());
+
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&file_size.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&byte_rate.to_le_bytes());
+        wav.extend_from_slice(&byte_rate.to_le_bytes());
+        wav.extend_from_slice(&block_alignment.to_le_bytes());
+        wav.extend_from_slice(&bits_per_sample.to_le_bytes());
+
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&audio_data_len.to_le_bytes());
+        wav.extend_from_slice(&self.audiobuffer);
+
+        wav
+    }
 }
 
 fn window_config() -> macroquad::window::Conf {
@@ -97,6 +136,17 @@ async fn main() {
     texture.set_filter(macroquad::texture::FilterMode::Nearest);
     loop {
         lbp.cycle();
+        let audio_data = lbp.process_audio();
+        if let Ok(sound) = macroquad::audio::load_sound_from_bytes(&audio_data).await {
+            macroquad::audio::play_sound(
+                &sound,
+                macroquad::audio::PlaySoundParams {
+                    looped: false,
+                    volume: 100.0,
+                },
+            );
+        }
+
         lbp.poll_keys();
         if macroquad::input::is_key_down(macroquad::input::KeyCode::Escape) {
             break;
